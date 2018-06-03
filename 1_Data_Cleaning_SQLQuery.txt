@@ -1,0 +1,153 @@
+First we need to convert the hourly data of air_reserve to daily basis,
+so we made a file name called air_data where we made this changes
+
+******************  Query  ************************
+create table air_data
+(air_store_id varchar(50), visit_date date, visitors int);
+
+insert into air_data (air_store_id, visit_date, visitors)
+select air_store_id, visit_datetime, sum(reserve_visitors) as visitors from air_reserve
+group by air_store_id, visit_datetime;
+***************************************************
+
+We did the same for hpg converting hourly data into daily data
+
+******************  Query  ************************
+create table hpg_data
+(hpg_store_id varchar(50), visit_date date, visitors int);
+
+insert into hpg_data (hpg_store_id, visit_date, visitors)
+select hpg_store_id, visit_datetime, sum(reserve_visitors) as visitors from hpg_reserve
+group by hpg_store_id, visit_datetime;
+***************************************************
+
+We are trying to implement the idea that is
+air_visit_data = Air reserve data + Hpg reserve data + Walkins
+
+Now, we need to sort the data from store_id_relation so from store_id_relation we made a new data file name hpg_storeid with hpg_store_id.
+
+******************  Query  ************************
+create table hpg_storeid
+(hpg_store_id varchar(50), visit_date date, visitors int);
+
+insert into hpg_storeid (hpg_store_id, visit_date, visitors)
+select * from hpg_data where hpg_store_id in (select hpg_store_id from store_id_relation)
+***************************************************
+
+Now we wanted to convert hpg_store_id into air_store_id, so we did
+
+******************  Query  ************************
+
+select air_store_id.store_id_relation, visit_date.hpg_storeid, visitors.hpg_storeid from
+store_id_relation left join hpg_storeid on
+hpg_store_id.store_id_relation = hpg_store_id.hpg_storeid
+group by air_store_id.store_id_relation
+***************************************************
+
+Then, we inserted the result of above query in new table called airdata
+
+******************  Query  ************************
+
+create table airdata
+(air_store_id varchar(50), visit_date date, visitors int);
+
+insert into airdata (air_store_id, visit_date, visitors)
+select store_id_relation.air_store_id, hpg_storeid.visit_date, hpg_storeid.visitors from
+store_id_relation left join hpg_storeid on
+store_id_relation.hpg_store_id = hpg_storeid.hpg_store_id
+group by store_id_relation.air_store_id, hpg_storeid.visit_date, hpg_storeid.visitors;
+***************************************************
+
+Now, we need to combine air_data which consists of daily records of air_reserve and 
+airdata which consists of related entries of air_store_id which contains hpg data
+
+******************  Query  ************************
+
+select air_data.air_store_id, air_data.visit_date, air_data.visitors, airdata.visitors
+from air_data left join airdata 
+on air_data.air_store_id = airdata.air_store_id 
+and air_data.visit_date = airdata.visit_date
+group by air_data.air_store_id, air_data.visit_date, air_data.visitors, airdata.visitors;
+***************************************************
+
+We created a new file out of this data and stored it in file named air_data
+
+******************  Query  ************************
+
+create table air
+(air_store_id varchar(50), visit_date date, visitors_1 int, visitors_2 int);
+
+insert into air (air_store_id, visit_date, visitors_1, visitors_2)
+select air_data.air_store_id, air_data.visit_date, air_data.visitors, airdata.visitors
+from air_data left join airdata 
+on air_data.air_store_id = airdata.air_store_id 
+and air_data.visit_date = airdata.visit_date
+group by air_data.air_store_id, air_data.visit_date, air_data.visitors, airdata.visitors;
+***************************************************
+
+After this there were null entries in vistors_2 so we converted it into 0
+
+******************  Query  ************************
+
+Update air Set visitors_2 = 0
+Where visitors_2 Is Null;
+***************************************************
+
+Now, we added both the visitors and made a new file air_reserve_data which contains the data from air_data and airdata from air
+
+******************  Query  ************************
+
+create table air_reserve_data
+(air_store_id varchar(50), visit_date date, visitors int);
+
+insert into air_reserve_data (air_store_id, visit_date, visitors)
+select air_store_id, visit_date, SUM(visitors_1 + visitors_2) as visitors
+from air group by air_store_id, visit_date;
+***************************************************
+
+Now this file contains the reservation data from air_reserve and relevant air_store_id's from hpg_reserve.
+
+Now we are creating a new file data where we are comparing the visitors from air_visit_data and air_reserve_data.
+
+******************  Query  ************************
+
+create table data
+(air_store_id varchar(50), visit_date date, visitors_visited int, visitors_reserved int)
+
+insert into data (air_store_id, visit_date, visitors_visited, visitors_reserved)
+select air_visit_data.air_store_id, air_visit_data.visit_date,
+air_visit_data.visitors, air_reserve_data.visitors from
+air_visit_data left join air_reserve_data on
+air_visit_data.air_store_id = air_reserve_data.air_store_id
+group by air_visit_data.air_store_id, air_visit_data.visit_date,
+air_visit_data.visitors, air_reserve_data.visitors;
+***************************************************
+
+No we need to find the Genre and the location so we made a new file called distinct_store_id which
+contains the unique air store id from data file.
+Then we checked the tables distinct_store_id and air_store_info and found out that both the table contains 829 records which are related
+to each other.
+
+So we decided to join data and air_store_info table to fetch air_store_id, area_name, logitude, latitude, visit date,
+visitors visited and visitors reserved.
+
+The file name air_combined contains all the information.
+
+******************  Query  ************************
+
+create table air_combined
+(air_store_id varchar(50), air_genre_name varchar(50), air_area_name varchar (50),
+latitude varchar(50), longitude varchar(50), visit_date date, visitors_visited int, 
+visitors_reserved int)
+
+insert into air_combined
+(air_store_id, air_genre_name, air_area_name,
+latitude, longitude, visit_date, visitors_visited, 
+visitors_reserved)
+select air_store_info.air_store_id, air_store_info.air_genre_name, air_store_info.air_area_name,
+air_store_info.latitude, air_store_info.longitude, 
+data.visit_date, data.visitors_visited, data.visitors_reserved from
+air_store_info join data on
+air_store_info.air_store_id = data.air_store_id
+order by air_store_info.air_store_id, data.visit_date;
+***************************************************
